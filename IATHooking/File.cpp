@@ -2,6 +2,22 @@
 
 #include "File.h"
 
+//inline BOOL is_system(fs::path path) {
+//
+//}
+//inline BOOL is_program_file(fs::path path) {
+//	char env_path[MAX_PATH];
+//	if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_SYSTEM, NULL, 0, env_path))) {
+//		
+//		strcmp((char*)path.root_path().c_str(), env_path);
+//		return TRUE;
+//	}
+//}
+
+inline BOOL is_user_name(fs::path path);
+inline BOOL is_local(fs::path path);
+inline BOOL is_windows(fs::path path);
+
 HANDLE HookCreateFileA(
 	LPCSTR                lpFileName,
 	DWORD                 dwDesiredAccess,
@@ -11,9 +27,7 @@ HANDLE HookCreateFileA(
 	DWORD                 dwFlagsAndAttributes,
 	HANDLE                hTemplateFile
 ) {
-	ObjectFile* mFile = new ObjectFile(lpFileName);
-	SandboxLogs->insertRecord("CreateFile", mFile);
-	return mObjectsManager->insertObject(mFile);
+	return TrueCreateFileA(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
 }
 
 HANDLE HookCreateFileW(
@@ -36,7 +50,7 @@ BOOL HookWriteFile(
 	LPDWORD      lpNumberOfBytesWritten,
 	LPOVERLAPPED lpOverlapped
 ) {
-	return SandboxLogs->insertRecord("WriteFile", mObjectsManager->getObject(hFile));
+	return TrueWriteFile(hFile, lpBuffer, nNumberOfBytesToWrite, lpNumberOfBytesWritten, lpOverlapped);
 }
 
 BOOL HookWriteFileEx(
@@ -46,7 +60,7 @@ BOOL HookWriteFileEx(
 	LPOVERLAPPED                    lpOverlapped,
 	LPOVERLAPPED_COMPLETION_ROUTINE lpCompletionRoutine
 ) {
-	return SandboxLogs->insertRecord("WriteFileEx", mObjectsManager->getObject(hFile));
+	return TRUE;
 }
 
 BOOL HookReadFile(
@@ -56,7 +70,7 @@ BOOL HookReadFile(
 	LPDWORD      lpNumberOfBytesRead,
 	LPOVERLAPPED lpOverlapped
 ) {
-	return SandboxLogs->insertRecord("ReadFile", mObjectsManager->getObject(hFile));
+	return TRUE;
 }
 
 BOOL HookReadFileEx(
@@ -66,15 +80,12 @@ BOOL HookReadFileEx(
 	LPOVERLAPPED                    lpOverlapped,
 	LPOVERLAPPED_COMPLETION_ROUTINE lpCompletionRoutine
 ) {
-	return SandboxLogs->insertRecord("ReadFileEx", mObjectsManager->getObject(hFile));
+	return TRUE;
 }
 
 BOOL HookDeleteFileA(
 	LPCSTR lpFileName
 ) {
-	ObjectFile* object = new ObjectFile(lpFileName);
-	mObjectsManager->deleteObject(object);
-	SandboxLogs->insertRecord("DeleteFile", object);
 	return TRUE;
 }
 

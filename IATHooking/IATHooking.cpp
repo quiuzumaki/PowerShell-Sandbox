@@ -1,184 +1,57 @@
 ﻿
 #include <iostream>
 #include <Windows.h>
-#include "Hook.h"
-#include "HookFunctions.h"
-#include "ObjectsManager.h"
-#include "Logs.h"
+#include "File.h"
 #include <Psapi.h> 
 #include <TlHelp32.h>
 #include <filesystem>
+#include <ShlObj.h>
+#include <fstream>
 
-using namespace std;
+namespace fs = std::filesystem;
+
 
 #define VARIADIC(Param, ...) Param(__VA_ARGS__)
+#define LOGI(...) std::printf(__VA_ARGS__)
 
-ULONGLONG GetProcessID(const char * process_name)
-{
-	HANDLE snapshot_handle;
-	if ((snapshot_handle = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)) == INVALID_HANDLE_VALUE)
-	{
-		throw runtime_error("CreateToolhelp32Snapshot failed: " + to_string(GetLastError()));
-	}
-
-	ULONGLONG pid = -1;
-	PROCESSENTRY32 pe;
-	ZeroMemory(&pe, sizeof(PROCESSENTRY32W));
-	pe.dwSize = sizeof(PROCESSENTRY32);
-
-	if (Process32First(snapshot_handle, &pe))
-	{
-		while (Process32Next(snapshot_handle, &pe))
-		{
-			if (strcmp(pe.szExeFile, process_name))
-			{
-				pid = pe.th32ProcessID;
-				break;
-			}
-		}
-	}
-	else
-	{
-		CloseHandle(snapshot_handle);
-		throw runtime_error("Process32First failed: " + to_string(GetLastError()));
-	}
-
-	if (pid == -1)
-	{
-		CloseHandle(snapshot_handle);
-		throw runtime_error("process not found");
-	}
-
-	CloseHandle(snapshot_handle);
-	return pid;
-}
-
-MODULEINFO GetModuleInfo(HANDLE hProcess)
-{
-	MODULEINFO info = {};
-	if (hProcess)
-	{	
-		HMODULE* modules = nullptr;
-		unsigned long moduleCount = 0;
-		EnumProcessModules(hProcess, modules, 0, &moduleCount);
-		moduleCount = moduleCount / sizeof(HMODULE);
-
-		modules = new HMODULE[moduleCount / sizeof(HMODULE)];
-		char moduleName[64];
-		EnumProcessModules(hProcess, modules, moduleCount * sizeof(HMODULE), &moduleCount);
-		try {
-			for (unsigned long i = 0; i < moduleCount; i++)
-			{
-				GetModuleBaseNameA(hProcess, modules[i], moduleName, sizeof(moduleName));
-				if (_strcmpi(moduleName, "powershell.exe") == 0)
-				{
-					if (GetModuleInformation(hProcess, modules[i], &info, sizeof(info)))
-						break;
-					throw std::runtime_error("GetModuleInformation is error" + std::to_string(GetLastError()));
-				}
-				if (i == 0) // catches first module in case powershell.exe does not exist
-				{
-					GetModuleInformation(hProcess, modules[i], &info, sizeof(info));
-				}
-			}
-		} catch (const std::exception& e) {
-			std::cerr << e.what();
-		}
-	}
-	return info;
-}
-
-/// <summary> 
-/// Step 1: find PID of process 
-/// Step 2: find Handle of process 
-/// Step 3: get base address of module in process 
-/// Step 4: read all bytes of module and save to a variable 
-/// Step 5: parser and find IAT 
-/// Step 6: write code to memory of process  
-/// </summary> 
-
-void TestOpenProcess() {
-	HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS | PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, GetProcessID("powershell.exe"));
-
-	MODULEINFO moduleInfo = GetModuleInfo(hProcess);
-
-	ModuleProcessInfo info = ModuleProcessInfo(hProcess, moduleInfo);
-	
-	LPCVOID pBuffer = ReadModuleProcess(info);
-
-	InstallHookProcess(pBuffer);
-
-	// WriteProcessMemory(info);
-}
-
-void GetFilesInDirectory(std::vector<string>& out, const string& directory, bool getFolderNames)
-{
-	HANDLE dir;
-	WIN32_FIND_DATAA file_data;
-
-	if ((dir = FindFirstFileA((directory + "/*").c_str(), &file_data)) == INVALID_HANDLE_VALUE)
-		return; /* No files found */
-
-	do {
-		const string file_name = file_data.cFileName;
-		const string full_file_name = directory + "/" + file_name;
-		const bool is_directory = ((file_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0);
-
-		if (file_name[0] == '.')
-			continue;
-
-		if (is_directory && !getFolderNames)
-			continue;
-
-		out.push_back(full_file_name);
-
-	} while (FindNextFileA(dir, &file_data));
-
-	FindClose(dir);
-}
-
-void TestLogs() {
-	Logs mLogs;
-	ObjectFile* mFile = new ObjectFile("qui.txt");
-
-	// if (typeid(mFile) == typeid(otherFile)) 
-	//	cout << typeid(ObjectFile*).name() << endl;
-	mLogs.insertRecord("CreateFileA", mFile);
-	mLogs.insertRecord("CreateFileA", new ObjectFile("tmp.txt"));
-	mLogs.insertRecord("DeleteFileA", mFile);
-
-	
-	mLogs.getLogs();
-}
-
-void TestCreateFile(const vector<string> files, DWORD mode) {
-	for (int i = 0; i < files.size(); i++)
-		HANDLE hFile = CreateFileA(files[i].c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL, mode, FILE_ATTRIBUTE_NORMAL, NULL);
-}
-
-void TestDeleteFile(const vector<string> files) {
-	for (int i = 0; i < files.size(); i++)
-		DeleteFileA(files[i].c_str());
-}
+char script[1000] = "powershell.exe New-Item -Path \"quido.txt\" -Value \"hello\"";
 
 void InjectDLL(HANDLE hProcess) {
 	LPVOID lpBaseAddress;
-	const char* dllName = "D:\\phuqui\\workspaces\\Desktop\\SrcThesis\\MySandbox\\x64\\Release\\MySandbox.dll";
+	const char* dllName = "D:\\WorkSpace\\Theis\\MySandbox\\x64\\Release\\MySandbox.dll";
 	size_t sz = strlen(dllName);
 
 	lpBaseAddress = VirtualAllocEx(hProcess, NULL, sz, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
-	WriteProcessMemory(hProcess, lpBaseAddress, dllName, sz, NULL);
+	WriteProcessMemory(hProcess, lpBaseAddress, dllName, sz, NULL);	
 	HMODULE hModule = GetModuleHandle("kernel32.dll");
 	LPVOID lpStartAddress = GetProcAddress(hModule, "LoadLibraryA");
+
 	HANDLE hThread = CreateRemoteThread(hProcess, NULL, 0, (LPTHREAD_START_ROUTINE)lpStartAddress, lpBaseAddress, 0, NULL);
 	if (hThread)
 	{
-		printf("Injection successful!\n");
+		std::printf("Injection successful!\n");	
 	}
 	else
 	{
-		printf("Injection unsuccessful!\n");
+		std::printf("Injection unsuccessful!\n");
 	}
+}
+
+std::string ConvertLPCWSTRToString(LPCWSTR lpcwszStr)
+{
+	// Determine the length of the converted string 
+	int strLength = WideCharToMultiByte(CP_UTF8, 0, lpcwszStr, -1,
+			nullptr, 0, nullptr, nullptr);
+
+	// Create a std::string with the determined length 
+	std::string str(strLength, 0);
+
+	// Perform the conversion from LPCWSTR to std::string 
+	WideCharToMultiByte(CP_UTF8, 0, lpcwszStr, -1, &str[0],
+		strLength, nullptr, nullptr);
+
+	// Return the converted std::string 
+	return str;
 }
 
 void TestCreateProcess() {
@@ -187,11 +60,9 @@ void TestCreateProcess() {
 
 	memset(&startupInfo, 0, sizeof(startupInfo));
 	startupInfo.cb = sizeof(STARTUPINFO);
-	char param[20] = " Write-Host \"Hello\"";
 	if (CreateProcess(
-		"C:\\Users\\ADMIN\\Desktop\\powershell.exe",	
-		//"C:\\Windows\\System32\\notepad.exe",
-		NULL,
+		"C:\\Windows\\system32\\WindowsPowerShell\\v1.0\\powershell.exe",
+		script,
 		NULL,
 		NULL,
 		FALSE,
@@ -201,19 +72,64 @@ void TestCreateProcess() {
 		&startupInfo,
 		&processInformation))
 	{
-		InjectDLL(processInformation.hProcess);
+		// InjectDLL(processInformation.hProcess);
 		printf("Process created in a suspended state. Press any key to resume...\n");
-		getchar();
+		// getchar();
 		ResumeThread(processInformation.hThread);
 	}
 }
 
+void TestOpenProcess() {
+	int id;	std::cin >> id;
+
+	HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS | PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, id);
+
+	InjectDLL(hProcess);
+
+}
+
 int main()
 {
-	TestCreateProcess();
-
-	// printf("\n----------- Getting Sandbox Logs -----------\n");
-	// SandboxLogs->getLogs();
+	TestOpenProcess();
+	// TestCreateProcess();
+	// TrueCreateFileA("quido.txt", GENERIC_READ | GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 	
+	/*fs::path pathToShow = "\\??\\C:\\Users\\LAP12512-local";
+	
+	std::cout << "exists() = " << fs::exists(pathToShow) << "\n"
+		<< "root_name() = " << pathToShow.root_name().string() << "\n"
+		<< "root_path() = " << pathToShow.root_path().string() << "\n"
+		<< "root_directory() = " << pathToShow.root_directory().string() << "\n"
+		<< "relative_path() = " << pathToShow.relative_path().string() << "\n"
+		<< "parent_path() = " << pathToShow.parent_path().string() << "\n"
+		<< "filename() = " << pathToShow.filename() << "\n"
+		<< "stem() = " << pathToShow.stem() << "\n"
+		<< "extension() = " << pathToShow.extension() << "\n";
+
+	char path[MAX_PATH];
+	if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_PROFILE, NULL, 0, path))) {
+		std::cout << path << "\n";
+		std::string relative_path = pathToShow.relative_path().string();
+		if (relative_path.find(path, 0) != std::string::npos)
+			std::cout << "User's folder: " << path << std::endl;
+	}
+	else {
+		std::cerr << "Failed to get user's folder." << std::endl;
+	}*/
+	/*for (auto i = pathToShow.begin(); i != pathToShow.end(); i++) {
+		std::cout << i->generic_string() << "\n";
+	}*/
+
+	/*PWSTR programDataPath;
+	HRESULT result = SHGetKnownFolderPath(FOLDERID_ProgramData, 0, NULL, &programDataPath);
+	std :: cout << ConvertLPCWSTRToString(programDataPath).c_str() << "\n";
+	std::cout << fs::temp_directory_path().string() << "\n";
+
+	if (!strcmp(ConvertLPCWSTRToString(programDataPath).c_str(), pathToShow.relative_path().string().c_str())) {
+		std::cout << "OK" << "\n";
+	}
+	SHGetKnownFolderPath(FOLDERID_Startup, 0, NULL, &programDataPath);
+	std::cout << ConvertLPCWSTRToString(programDataPath).c_str() << "\n";
+	is_system(pathToShow);*/
 	return 0;
 }
