@@ -23,14 +23,13 @@ ULONGLONG GetProcessID(const char * process_name)
 
 	ULONGLONG pid = -1;
 	PROCESSENTRY32 pe;
-	ZeroMemory(&pe, sizeof(PROCESSENTRY32W));
 	pe.dwSize = sizeof(PROCESSENTRY32);
 
 	if (Process32First(snapshot_handle, &pe))
 	{
 		while (Process32Next(snapshot_handle, &pe))
 		{
-			if (strcmp(pe.szExeFile, process_name))
+			if (!strcmp(pe.szExeFile, process_name))
 			{
 				pid = pe.th32ProcessID;
 				break;
@@ -97,18 +96,29 @@ MODULEINFO GetModuleInfo(HANDLE hProcess)
 /// Step 6: write code to memory of process  
 /// </summary> 
 
+void InjectDLL(HANDLE hProcess) {
+	LPVOID lpBaseAddress;
+	const char* dllName = "D:\\WorkSpace\\Theis\\MySandbox\\x64\\Release\\MySandbox.dll";
+	size_t sz = strlen(dllName);
+
+	lpBaseAddress = VirtualAllocEx(hProcess, NULL, sz, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+	WriteProcessMemory(hProcess, lpBaseAddress, dllName, sz, NULL);
+	HMODULE hModule = GetModuleHandle("kernel32.dll");
+	LPVOID lpStartAddress = GetProcAddress(hModule, "LoadLibraryA");
+	HANDLE hThread = CreateRemoteThread(hProcess, NULL, 0, (LPTHREAD_START_ROUTINE)lpStartAddress, lpBaseAddress, 0, NULL);
+	if (hThread)
+	{
+		printf("Injection successful!\n");
+	}
+	else
+	{
+		printf("Injection unsuccessful!\n");
+	}
+}
+
 void TestOpenProcess() {
 	HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS | PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, GetProcessID("powershell.exe"));
-
-	MODULEINFO moduleInfo = GetModuleInfo(hProcess);
-
-	ModuleProcessInfo info = ModuleProcessInfo(hProcess, moduleInfo);
-	
-	LPCVOID pBuffer = ReadModuleProcess(info);
-
-	InstallHookProcess(pBuffer);
-
-	// WriteProcessMemory(info);
+	InjectDLL(hProcess);
 }
 
 void GetFilesInDirectory(std::vector<string>& out, const string& directory, bool getFolderNames)
@@ -161,25 +171,7 @@ void TestDeleteFile(const vector<string> files) {
 		DeleteFileA(files[i].c_str());
 }
 
-void InjectDLL(HANDLE hProcess) {
-	LPVOID lpBaseAddress;
-	const char* dllName = "D:\\phuqui\\workspaces\\Desktop\\SrcThesis\\MySandbox\\x64\\Release\\MySandbox.dll";
-	size_t sz = strlen(dllName);
 
-	lpBaseAddress = VirtualAllocEx(hProcess, NULL, sz, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
-	WriteProcessMemory(hProcess, lpBaseAddress, dllName, sz, NULL);
-	HMODULE hModule = GetModuleHandle("kernel32.dll");
-	LPVOID lpStartAddress = GetProcAddress(hModule, "LoadLibraryA");
-	HANDLE hThread = CreateRemoteThread(hProcess, NULL, 0, (LPTHREAD_START_ROUTINE)lpStartAddress, lpBaseAddress, 0, NULL);
-	if (hThread)
-	{
-		printf("Injection successful!\n");
-	}
-	else
-	{
-		printf("Injection unsuccessful!\n");
-	}
-}
 
 void TestCreateProcess() {
 	STARTUPINFO             startupInfo;
@@ -210,8 +202,8 @@ void TestCreateProcess() {
 
 int main()
 {
-	TestCreateProcess();
-
+	// TestCreateProcess();
+	TestOpenProcess();
 	// printf("\n----------- Getting Sandbox Logs -----------\n");
 	// SandboxLogs->getLogs();
 	
