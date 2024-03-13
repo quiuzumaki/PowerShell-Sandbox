@@ -3,28 +3,35 @@
 #include <Windows.h>
 #include <map>
 #include <vector>
-#include "ObjectsManager.h"
 #include <iostream>
 #include <string>
+#include <fstream>
+#include <iomanip>
+
+
+#include "Utils.h"
 
 #ifndef LOGS_H
 #define LOGS_H
 
-typedef std::pair<LPCSTR, std::vector<LPCSTR>> RecordPair;
-typedef std::map<LPCSTR, std::vector<LPCSTR>> RecordsTable;
+#define TYPE(id) typeid(id).name();
 
 class Logs {
 private:
-	RecordsTable* mRecordsTable;
-	BOOL isExist(LPCSTR);
-public: 
+	LPCSTR filename = "Logs.txt";
+	std::ofstream stream;
+public:
 	Logs();
 	~Logs();
-	BOOL insertRecord(LPCSTR, Object*);
-	VOID getLogs();
-	BOOL isEmpty();
+	void open();
+	BOOL is_open();
+	void write(std::string buffer);
+	void write(std::wstring buffer);
+	void write(LPCSTR format, ...);
+	void write(LPCWSTR format, ...);
+	void write(PBYTE buffer, ULONG length);
 };
 
-extern Logs* SandboxLogs;
+extern Logs* mLogs;
 
 #endif // !LOGS_H

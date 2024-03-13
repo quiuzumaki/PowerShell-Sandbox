@@ -9,6 +9,8 @@
 #include <filesystem>
 #include <ShlObj.h>
 
+
+
 namespace fs = std::filesystem;
 
 static HANDLE(*TrueCreateFileA) (

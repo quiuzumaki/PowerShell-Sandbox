@@ -1,50 +1,69 @@
 #include "Logs.h"
 
-Logs::Logs() {
-	this->mRecordsTable = new RecordsTable();
-}
+Logs::Logs() {}
 
 Logs::~Logs() {
-	delete this->mRecordsTable;
+	stream.close();
 }
 
-BOOL Logs::isExist(LPCSTR APIName) {
-	if (this->isEmpty()) {
-		return FALSE;
-	}
-
-	if (this->mRecordsTable->find(APIName) != this->mRecordsTable->end()) {
-		return TRUE;
-	}
-	return FALSE;
+void Logs::open() {
+	stream.open(this->filename, std::ofstream::binary);
 }
 
-BOOL Logs::insertRecord(LPCSTR APIName, Object* object) {
-	if (object == NULL) {
-		return FALSE;
-	}
-
-	(*this->mRecordsTable)[APIName].push_back(object->getInfo());
-	return TRUE;
+BOOL Logs::is_open() {
+	return this->stream.is_open();
 }
 
-VOID Logs::getLogs() {
-	
-	for (RecordsTable::iterator it = this->mRecordsTable->begin(); it != this->mRecordsTable->end(); it++) {
-		std::cout << it->first;
+void Logs::write(std::string buffer) {
+	// this->stream.write(buffer.c_str(), buffer.length());
+	this->stream << buffer << "\n";
+}
 
-		std::vector<LPCSTR> lstFileName = it->second;
-		std::cout << ": " + std::to_string(lstFileName.size()) + "\n";
-		
-		for (int i = 0; i < lstFileName.size(); i++) {
-			std::cout << "\t\t" + (std::string)(lstFileName[i]) + "\n";
+void Logs::write(std::wstring buffer) {
+	this->stream << ConvertLPCWSTRToString(buffer.c_str()) << "\n";
+}
+
+void Logs::write(LPCSTR format, ...) {
+	char log[1000];
+	va_list args;
+	va_start(args, format);
+	sprintf_s(log, sizeof(log), format, args);
+	this->stream << log << "\n";
+	va_end(args);
+}
+
+void Logs::write(LPCWSTR format, ...) {
+	wchar_t log[256];
+	va_list args;
+	va_start(args, format);
+	vswprintf(log, sizeof(log), format, args);
+	this->stream << ConvertLPCWSTRToString(std::wstring(log).c_str()) << "\n";
+	va_end(args);
+}
+
+void Logs::write(PBYTE buffer, ULONG length) {
+	int x = length / 16;
+	int y = length % 16;
+	for (int i = 0; i < x; i++) {
+		for (int j = 0; j < 16; j++) {
+			this->stream << std::setfill('0') << std::setw(2) << std::hex << (int)buffer[16 * i + j] << " ";
 		}
-		std::cout << "\n";
+		this->stream << "     ";
+		for (int j = 0; j < 16; j++) {
+			this->stream << (char)buffer[16 * i + j] << " ";
+		}
+		this->stream << "\n";
 	}
+
+	for (int j = 0; j < y; j++) {
+		this->stream << std::setfill('0') << std::setw(2) << std::hex << (int)buffer[16 * x + j] << " ";
+	}
+	this->stream << "     ";
+	for (int j = 0; j < y; j++) {
+		this->stream << (char)buffer[16 * x + j] << " ";
+	}
+	this->stream << "\n";
 }
 
-BOOL Logs::isEmpty() {
-	return this->mRecordsTable->empty();
-}
 
-Logs* SandboxLogs = new Logs();
+Logs* mLogs = new Logs();
