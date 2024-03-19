@@ -1,15 +1,23 @@
 ﻿
 #include <iostream>
 #include <Windows.h>
-#include "Hook.h"
-#include "HookFunctions.h"
-#include "ObjectsManager.h"
-#include "Logs.h"
 #include <Psapi.h> 
 #include <TlHelp32.h>
 #include <filesystem>
+#include <yara.h>
+#include <algorithm>
+
+#include "Script.h"
+#include "Util.h"
+#include "HookFunctions.h"
+#include "ObjectsManager.h"
+#include "Logs.h"
+#include "Blob.h"
+#include "Rules.h"
 
 using namespace std;
+
+namespace fs = std::filesystem;
 
 #define VARIADIC(Param, ...) Param(__VA_ARGS__)
 
@@ -52,53 +60,9 @@ ULONGLONG GetProcessID(const char * process_name)
 	return pid;
 }
 
-MODULEINFO GetModuleInfo(HANDLE hProcess)
-{
-	MODULEINFO info = {};
-	if (hProcess)
-	{	
-		HMODULE* modules = nullptr;
-		unsigned long moduleCount = 0;
-		EnumProcessModules(hProcess, modules, 0, &moduleCount);
-		moduleCount = moduleCount / sizeof(HMODULE);
-
-		modules = new HMODULE[moduleCount / sizeof(HMODULE)];
-		char moduleName[64];
-		EnumProcessModules(hProcess, modules, moduleCount * sizeof(HMODULE), &moduleCount);
-		try {
-			for (unsigned long i = 0; i < moduleCount; i++)
-			{
-				GetModuleBaseNameA(hProcess, modules[i], moduleName, sizeof(moduleName));
-				if (_strcmpi(moduleName, "powershell.exe") == 0)
-				{
-					if (GetModuleInformation(hProcess, modules[i], &info, sizeof(info)))
-						break;
-					throw std::runtime_error("GetModuleInformation is error" + std::to_string(GetLastError()));
-				}
-				if (i == 0) // catches first module in case powershell.exe does not exist
-				{
-					GetModuleInformation(hProcess, modules[i], &info, sizeof(info));
-				}
-			}
-		} catch (const std::exception& e) {
-			std::cerr << e.what();
-		}
-	}
-	return info;
-}
-
-/// <summary> 
-/// Step 1: find PID of process 
-/// Step 2: find Handle of process 
-/// Step 3: get base address of module in process 
-/// Step 4: read all bytes of module and save to a variable 
-/// Step 5: parser and find IAT 
-/// Step 6: write code to memory of process  
-/// </summary> 
-
 void InjectDLL(HANDLE hProcess) {
 	LPVOID lpBaseAddress;
-	const char* dllName = "D:\\WorkSpace\\Theis\\MySandbox\\x64\\Release\\MySandbox.dll";
+	const char* dllName = "C:\\Users\\ADMIN\\workspace\\Thesis\\MySandbox\\x64\\Release\\MySandbox.dll";
 	size_t sz = strlen(dllName);
 
 	lpBaseAddress = VirtualAllocEx(hProcess, NULL, sz, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
@@ -121,91 +85,121 @@ void TestOpenProcess() {
 	InjectDLL(hProcess);
 }
 
-void GetFilesInDirectory(std::vector<string>& out, const string& directory, bool getFolderNames)
-{
-	HANDLE dir;
-	WIN32_FIND_DATAA file_data;
-
-	if ((dir = FindFirstFileA((directory + "/*").c_str(), &file_data)) == INVALID_HANDLE_VALUE)
-		return; /* No files found */
-
-	do {
-		const string file_name = file_data.cFileName;
-		const string full_file_name = directory + "/" + file_name;
-		const bool is_directory = ((file_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0);
-
-		if (file_name[0] == '.')
-			continue;
-
-		if (is_directory && !getFolderNames)
-			continue;
-
-		out.push_back(full_file_name);
-
-	} while (FindNextFileA(dir, &file_data));
-
-	FindClose(dir);
-}
-
-void TestLogs() {
-	Logs mLogs;
-	ObjectFile* mFile = new ObjectFile("qui.txt");
-
-	// if (typeid(mFile) == typeid(otherFile)) 
-	//	cout << typeid(ObjectFile*).name() << endl;
-	mLogs.insertRecord("CreateFileA", mFile);
-	mLogs.insertRecord("CreateFileA", new ObjectFile("tmp.txt"));
-	mLogs.insertRecord("DeleteFileA", mFile);
-
-	
-	mLogs.getLogs();
-}
-
-void TestCreateFile(const vector<string> files, DWORD mode) {
-	for (int i = 0; i < files.size(); i++)
-		HANDLE hFile = CreateFileA(files[i].c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL, mode, FILE_ATTRIBUTE_NORMAL, NULL);
-}
-
-void TestDeleteFile(const vector<string> files) {
-	for (int i = 0; i < files.size(); i++)
-		DeleteFileA(files[i].c_str());
-}
-
-
-
 void TestCreateProcess() {
 	STARTUPINFO             startupInfo;
 	PROCESS_INFORMATION     processInformation;
 
 	memset(&startupInfo, 0, sizeof(startupInfo));
 	startupInfo.cb = sizeof(STARTUPINFO);
-	char param[20] = " Write-Host \"Hello\"";
+
 	if (CreateProcess(
-		"C:\\Users\\ADMIN\\Desktop\\powershell.exe",	
-		//"C:\\Windows\\System32\\notepad.exe",
+		"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
 		NULL,
 		NULL,
 		NULL,
 		FALSE,
 		CREATE_SUSPENDED,
 		NULL,
-		NULL,
+		"C:\\Users\\ADMIN",
 		&startupInfo,
 		&processInformation))
 	{
-		InjectDLL(processInformation.hProcess);
-		printf("Process created in a suspended state. Press any key to resume...\n");
-		getchar();
 		ResumeThread(processInformation.hThread);
+		InjectDLL(processInformation.hProcess);
+		// Sleep(2000);
+
+		WaitForSingleObject(processInformation.hProcess, INFINITE);
+
+
+		CloseHandle(processInformation.hProcess);
+		CloseHandle(processInformation.hThread);
 	}
 }
 
-int main()
-{
-	// TestCreateProcess();
-	TestOpenProcess();
-	// printf("\n----------- Getting Sandbox Logs -----------\n");
-	// SandboxLogs->getLogs();
+void test_match_blob(char* rule, uint8_t* buf, int sz) {
+	yr_initialize();
+	if (!matches_blob(rule, buf, sz, NULL, 0)) {
+		std::cout << "error";
+	}
+	else {
+		std::cout << "ok";
+	}
+	yr_finalize();
+}
+
+struct USER_DATA_CTX {
+	bool match = 0;
+	YR_META *meta;
+};
+
+int my_callback(
+	YR_SCAN_CONTEXT* context,
+	int message,
+	void* message_data,
+	void* user_data
+) {
 	
+	switch (message)
+	{
+	case CALLBACK_MSG_RULE_MATCHING:
+		((USER_DATA_CTX*)user_data)->match = TRUE;
+		((USER_DATA_CTX*)user_data)->meta = ((YR_RULE*)message_data)->metas;
+		break;
+	}
+	return CALLBACK_CONTINUE;
+}
+
+bool scan_memory_ex(char *my_rule, uint8_t *buffer, int size) {
+	YR_RULES* rules;
+	YR_RULE* rule;
+	
+	yr_initialize();
+
+	if (compile_rule(my_rule, &rules) != ERROR_SUCCESS)
+	{
+		std::cout << "error";
+		exit(EXIT_FAILURE);
+	}
+
+	USER_DATA_CTX ctx;
+	void* user_data = &ctx;
+
+	int scan_result = yr_rules_scan_mem(rules, buffer, size, SCAN_FLAGS_NO_TRYCATCH, my_callback, user_data, 0);
+
+	if (scan_result != ERROR_SUCCESS)
+	{
+		std::cout << "error";
+		exit(EXIT_FAILURE);
+	}
+
+	if (ctx.match) {
+		std::cout << ctx.meta->string; 
+	}
+
+	yr_rules_destroy(rules);
+	yr_finalize();
+
+	return ctx.match;
+}
+
+bool scan_memory(PBYTE buffer, int size) {
+	return scan_memory_ex(my_rules, (uint8_t*) buffer, size);
+}
+
+int main()
+{	
+	char rule[] = "\
+		import \"pe\" \
+		rule test { \
+			meta: \
+				description = \"Overlay Check\" \
+			condition: \
+				uint16(0) == 0x5a4d  \
+		}";
+	// TestCreateProcess();
+	// TestOpenProcess();
+	// test_save_load_rules();
+	scan_memory_ex(is_rar, PE32_FILE, sizeof(PE32_FILE));
+	// test_match_blob(rule, PE32_FILE, sizeof(PE32_FILE));
 	return 0;
 }
